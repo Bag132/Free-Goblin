@@ -1,6 +1,11 @@
+import time
+
 import requests
 from torpy import TorClient
 from torpy.http.requests import TorRequests
+from torpy.http.requests import tor_requests_session
+from multiprocessing.pool import ThreadPool
+from torpy.http.requests import tor_requests_session
 
 preflight_url = 'https://api.urbandictionary.com/v0/vote'
 preflight_headers = {
@@ -37,31 +42,33 @@ vote_headers = {
 }
 
 
-def preflight(sesh) -> requests.Response():
-	return sesh.options(preflight_url, headers=preflight_headers, timeout=5)
-
-
-def vote(sesh, entry_id, direction) -> requests.Response():
-	return sesh.post(vote_url, headers=vote_headers, data=vote_payload, timeout=5)
+def send_dislike(id):
+	with tor_requests_session() as sesh:
+		print(sesh.options(preflight_url, headers=preflight_headers, timeout=5).text)
+		payload = '{"defid": ' + str(id) + ', "direction": "down"}'
+		print(sesh.post(vote_url, headers=vote_headers, data=payload, timeout=5).text)
 
 
 def tor_bot():
 	from multiprocessing.pool import ThreadPool
-	from torpy.http.requests import tor_requests_session
 
-	with tor_requests_session() as sesh:  # returns requests.Session() object
-		links = 'https://httpbin.org/ip'
-		print(sesh.options(preflight_url, headers=preflight_headers, timeout=5).text)
-		print(sesh.post(vote_url, headers=vote_headers, data=vote_payload, timeout=5).text)
+	elements = [id] * 3
+	with ThreadPool(3) as pool:
+		pool.map(send_dislike, elements)
 
 
-# print(sesh.get(links).text)
+def tor_basic():
+	with tor_requests_session() as s:  # returns requests.Session() object
+		print('IP: ' + str(s.get('https://httpbin.org/ip').json().))
+		print(s.options(preflight_url, headers=preflight_headers).text)
+		print(s.post(vote_url, headers=vote_headers, data=vote_payload).text)
 
 
 def main():
-	tor_bot()
+	while True:
+		tor_basic()
+		time.sleep(1)
 
 
-# ToDo: Run through different tor circuits
 if __name__ == '__main__':
 	main()
