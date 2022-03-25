@@ -1,9 +1,7 @@
 import time
 
 import requests
-from torpy import TorClient
-from torpy.http.requests import TorRequests
-from torpy.http.requests import tor_requests_session
+import torpy.keyagreement
 from multiprocessing.pool import ThreadPool
 from torpy.http.requests import tor_requests_session
 
@@ -14,7 +12,7 @@ preflight_headers = {
 	'access-control-request-method': 'POST',
 	'access-control-request-headers': 'content-type',
 	'origin': 'https://www.urbandictionary.com',
-	'user-agent': 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0',
+	'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.82 Safari/537.36',
 	'sec-fetch-mode': 'cors',
 	'sec-fetch-site': 'same-site',
 	'sec-fetch-dest': 'empty',
@@ -29,7 +27,7 @@ vote_headers = {
 	'sec-ch-ua': '" Not A;Brand";v="99", "Chromium";v="99", "Google Chrome";v="99"',
 	'dnt': '1',
 	'sec-ch-ua-mobile': '?0',
-	'user-agent': 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0',
+	'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.82 Safari/537.36',
 	'sec-ch-ua-platform': '"Windows"',
 	'content-type': 'application/json; charset=utf-8',
 	'accept': '*/*',
@@ -42,32 +40,54 @@ vote_headers = {
 }
 
 
-def send_dislike(id):
+def dislike_worker(did):
 	with tor_requests_session() as sesh:
+		print('IP: ' + str(sesh.get('https://httpbin.org/ip').json()['origin']))
 		print(sesh.options(preflight_url, headers=preflight_headers, timeout=5).text)
-		payload = '{"defid": ' + str(id) + ', "direction": "down"}'
+		payload = '{"defid": ' + str(did) + ', "direction": "down"}'
 		print(sesh.post(vote_url, headers=vote_headers, data=payload, timeout=5).text)
 
 
-def tor_bot():
-	from multiprocessing.pool import ThreadPool
-
-	elements = [id] * 3
+def send_dislike(did):
+	ids = [did, did, did]
 	with ThreadPool(3) as pool:
-		pool.map(send_dislike, elements)
+		pool.map(dislike_worker, ids)
 
 
-def tor_basic():
-	with tor_requests_session() as s:  # returns requests.Session() object
-		print('IP: ' + str(s.get('https://httpbin.org/ip').json().))
-		print(s.options(preflight_url, headers=preflight_headers).text)
-		print(s.post(vote_url, headers=vote_headers, data=vote_payload).text)
+def like_worker(defid):
+	with tor_requests_session() as sesh:
+		# print('IP: ' + str(sesh.get('https://httpbin.org/ip').json()['origin']))
+		sesh.options(preflight_url, headers=preflight_headers, timeout=5)
+		time.sleep(0.075)
+		payload = '{"defid": ' + str(defid) + ', "direction": "up"}'
+		vote_response = sesh.post(vote_url, headers=vote_headers, data=payload, timeout=5).json()
+		vote_status = vote_response['status']
+		if vote_status != 'challenge':
+			print("Up: " + str(vote_response['up']) + ', Down: ' + str(vote_response['down']) + ' | Saved')
+		else:
+			print('Challenged')
+
+
+def send_like(defid, threads=3):
+	ids = [defid] * threads
+	with ThreadPool(threads) as pool:
+		pool.map(like_worker, ids)
 
 
 def main():
 	while True:
-		tor_basic()
-		time.sleep(1)
+		try:
+			send_like('15108537', threads=10)
+		except requests.exceptions.ReadTimeout:
+			pass
+		except requests.exceptions.ConnectTimeout:
+			pass
+		except torpy.keyagreement.KeyAgreementError:
+			pass
+		except torpy.circuit.CellTimeoutError:
+			pass
+		except torpy.cell_socket.TorSocketConnectError:
+			pass
 
 
 if __name__ == '__main__':
