@@ -3,6 +3,7 @@ import time
 import requests
 import torpy.keyagreement
 from multiprocessing.pool import ThreadPool
+import threading
 from torpy.http.requests import tor_requests_session
 
 preflight_url = 'https://api.urbandictionary.com/v0/vote'
@@ -40,12 +41,30 @@ vote_headers = {
 }
 
 
-def dislike_worker(did):
-	with tor_requests_session() as sesh:
-		print('IP: ' + str(sesh.get('https://httpbin.org/ip').json()['origin']))
-		print(sesh.options(preflight_url, headers=preflight_headers, timeout=5).text)
-		payload = '{"defid": ' + str(did) + ', "direction": "down"}'
-		print(sesh.post(vote_url, headers=vote_headers, data=payload, timeout=5).text)
+# def dislike_worker(did):
+# 	with tor_requests_session() as sesh:
+# 		print('IP: ' + str(sesh.get('https://httpbin.org/ip').json()['origin']))
+# 		print(sesh.options(preflight_url, headers=preflight_headers, timeout=5).text)
+# 		payload = '{"defid": ' + str(did) + ', "direction": "down"}'
+# 		print(sesh.post(vote_url, headers=vote_headers, data=payload, timeout=5).text)
+
+def dislike_worker(defid):
+	while True:
+		try:
+			with tor_requests_session() as sesh:
+				# print('IP: ' + str(sesh.get('https://httpbin.org/ip').json()['origin']))
+				sesh.options(preflight_url, headers=preflight_headers, timeout=5)
+				time.sleep(0.075)
+				payload = '{"defid": ' + str(defid) + ', "direction": "down"}'
+				vote_response = sesh.post(vote_url, headers=vote_headers, data=payload, timeout=5).json()
+				vote_status = vote_response['status']
+				if vote_status != 'challenge':
+					print("Up: " + str(vote_response['up']) + ', Down: ' + str(vote_response['down']) + ' | Saved')
+				else:
+					print(str(defid) + 'Challenged')
+		except Exception:
+			pass
+		time.sleep(3)
 
 
 def send_dislike(did):
@@ -55,29 +74,46 @@ def send_dislike(did):
 
 
 def like_worker(defid):
-	with tor_requests_session() as sesh:
-		# print('IP: ' + str(sesh.get('https://httpbin.org/ip').json()['origin']))
-		sesh.options(preflight_url, headers=preflight_headers, timeout=5)
-		time.sleep(0.075)
-		payload = '{"defid": ' + str(defid) + ', "direction": "up"}'
-		vote_response = sesh.post(vote_url, headers=vote_headers, data=payload, timeout=5).json()
-		vote_status = vote_response['status']
-		if vote_status != 'challenge':
-			print("Up: " + str(vote_response['up']) + ', Down: ' + str(vote_response['down']) + ' | Saved')
-		else:
-			print('Challenged')
+	downdefid = '16423887'
+	while True:
+		try:
+			with tor_requests_session() as sesh:
+				# print('IP: ' + str(sesh.get('https://httpbin.org/ip').json()['origin']))
+				sesh.options(preflight_url, headers=preflight_headers, timeout=5)
+				time.sleep(0.075)
+				payload = '{"defid": ' + str(defid) + ', "direction": "up"}'
+				down_payload = '{"defid": ' + str(downdefid) + ', "direction": "down"}'
+				vote_response = sesh.post(vote_url, headers=vote_headers, data=payload, timeout=5).json()
+				downvote_response = sesh.post(vote_url, headers=vote_headers, data=down_payload, timeout=5).json()
+				vote_status = vote_response['status']
+				downvote_status = downvote_response['status']
+
+				if vote_status != 'challenge':
+					print(str(defid) + " Up: " + str(vote_response['up']) + ', Down: ' + str(vote_response['down']) + ' | Saved')
+				else:
+					print(str(defid) + ' Challenged')
+
+				if downvote_status != 'challenge':
+					print(str(downdefid) + " Up: " + str(downvote_response['up']) + ', Down: ' + str(downvote_response['down']) + ' | Saved')
+				else:
+					print(str(downdefid) + ' Challenged')
+
+		except Exception:
+			pass
+		time.sleep(3)
 
 
 def send_like(defid, threads=3):
-	ids = [defid] * threads
-	with ThreadPool(threads) as pool:
-		pool.map(like_worker, ids)
+	pool = ThreadPool(threads)
+	pool.map(like_worker, [defid] * threads)
 
 
 def main():
 	while True:
 		try:
-			send_like('15108537', threads=10)
+			send_like('15108537', threads=5)
+			# send_dislike('16423887', threads=5)
+		# 				send_like('17012584', threads=3)
 		except requests.exceptions.ReadTimeout:
 			pass
 		except requests.exceptions.ConnectTimeout:
@@ -88,6 +124,8 @@ def main():
 			pass
 		except torpy.cell_socket.TorSocketConnectError:
 			pass
+		except Exception:
+			print('Error')
 
 
 if __name__ == '__main__':
