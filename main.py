@@ -1,11 +1,15 @@
+from email.policy import default
+import re
 import time
-
+import sys
+from tkinter import FALSE
 import requests
+import argparse
 import torpy.keyagreement
 from multiprocessing.pool import ThreadPool
 from torpy.http.requests import tor_requests_session
 
-preflight_url = 'https://api.urbandictionary.com/v0/vote'
+vote_url = 'https://api.urbandictionary.com/v0/vote'
 preflight_headers = {
 	'authority': 'api.urbandictionary.com',
 	'accept': '*/*',
@@ -20,7 +24,6 @@ preflight_headers = {
 	'accept-language': 'en-US,en;q=0.9',
 }
 
-vote_payload = '{"defid": 16423887, "direction": "down"} '
 vote_url = 'https://api.urbandictionary.com/v0/vote'
 vote_headers = {
 	'authority': 'api.urbandictionary.com',
@@ -43,54 +46,83 @@ upvotes = [0]
 downvotes = [0]
 
 
-def like_worker(defid):
-	downdefid = '16423887'
+def vote(sesh, defid, up):
+	# Send vote
+	direction = 'up' if up else 'down'
+	payload = '{"defid": ' + str(defid) + ', "direction": "' + direction + '"}'
+	response = sesh.post(vote_url, headers=vote_headers, data=payload, timeout=5).json()
+	status = response['status']
+
+	# Display finished status of vote
+	if status != 'challenge':
+		if up:
+			upvotes[0] = upvotes[0] + 1
+			print(f'{defid} Up: {response["up"]}, Down: {response["down"]} | Saved | Upvotes: {upvotes[0]}')
+		else:
+			downvotes[0] = downvotes[0] + 1
+			print(f'{defid} Up: {response["up"]}, Down: {response["down"]} | Saved | Downvotes: {downvotes[0]}')
+	else:
+		print(str(defid) + ' Challenged')
+
+
+def like_worker(ids):
+	upID = ids[0]
+	downID = ids[1]
+	# print(f'upID = {upID}\ndownID = {downID}')
+	if downID is None and upID is None:
+		return
+
 	while True:
+		# Ignore all torpy errors
 		try:
+			# Generate new tor session
 			with tor_requests_session() as sesh:
 				# print('IP: ' + str(sesh.get('https://httpbin.org/ip').json()['origin']))
-				sesh.options(preflight_url, headers=preflight_headers, timeout=5)
+				sesh.options(vote_url, headers=preflight_headers, timeout=5)
 				time.sleep(0.075)
-				payload = '{"defid": ' + str(defid) + ', "direction": "up"}'
-				down_payload = '{"defid": ' + str(downdefid) + ', "direction": "down"}'
-				vote_response = sesh.post(vote_url, headers=vote_headers, data=payload, timeout=5).json()
-				downvote_response = sesh.post(vote_url, headers=vote_headers, data=down_payload, timeout=5).json()
-				vote_status = vote_response['status']
-				downvote_status = downvote_response['status']
 
-				if vote_status != 'challenge':
-					upvotes[0] = upvotes[0] + 1
-					print(str(defid) + " Up: " + str(vote_response['up']) + ', Down: ' + str(
-						vote_response['down']) + ' | Saved | Upvotes: ' + str(upvotes[0]))
-				else:
-					print(str(defid) + ' Challenged')
+				if upID is not None:
+					vote(sesh, upID, True)
 
-				if downvote_status != 'challenge':
-					downvotes[0] = downvotes[0] + 1
-					print(str(downdefid) + " Up: " + str(downvote_response['up']) + ', Down: ' + str(
-						downvote_response['down']) + ' | Saved | Downvotes: ' + str(downvotes[0]))
-				else:
-					print(str(downdefid) + ' Challenged')
+				if downID is not None:			
+					vote(sesh, downID, False)
 
 		except Exception:
 			pass
 		time.sleep(3)
 
 
-def send_likes(defid, threads=3):
+def send_likes(likeID:str = None, dislikeID:str = None, threads:int = 1) -> None:
+	"""Starts multiple threads to send likes to a likeID or dislikeID
+
+	Args:
+		likeID (str): Definition ID to send likes to 
+		dislikeID (str): Definition ID to send dislikes to 
+		threads (int): Number of threads to create for sending likes or dislikes
+	"""
+
 	pool = ThreadPool(threads)
-	pool.map(like_worker, [defid] * threads)
+	# For every ID tuple assign a new like worker to the arguments
+	# Blocking call
+	pool.map(like_worker, [(likeID, dislikeID)] * threads)
+	
 
-
-def main():
-	while True:
-		try:
-			send_likes('15108537', threads=5)
-		except torpy.cell_socket.TorSocketConnectError & torpy.circuit.CellTimeoutError & torpy.keyagreement.KeyAgreementError & requests.exceptions.ConnectTimeout & requests.exceptions.ReadTimeout:
-			pass  # shutup nerd
-		except Exception:
-			print('Error')
-
-
+# '15108537' 17012584  16423887
 if __name__ == '__main__':
-	main()
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--up', '-u', required=False, help='Definition ID to like')
+	parser.add_argument('--down', '-d', required=False, help='Definition ID to dislike')
+	parser.add_argument('--threads', '-t', required=False, help='Number of threads to use', default='2')
+	args = parser.parse_args()
+
+	if not args.up and not args.down:
+		parser.print_help(sys.stderr)
+		exit(1)
+
+	print(f'Sending likes to {args.up} and dislikes to {args.down} with {args.threads} threads')
+
+	# Renew threads if they fail
+	while True:
+		send_likes(likeID=args.up, dislikeID=args.down, threads=int(args.threads))
+
+
